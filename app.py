@@ -23,6 +23,37 @@ def is_valid_hex(color):
     except ValueError:
         return False
 
+def validate_params(palette_raw, genre):
+    """Validate palette and genre inputs. Returns an error string, or None if valid."""
+    if not palette_raw:
+        return "palette is required. Provide at least one HEX color (e.g. palette=%23FF5733)."
+    if len(palette_raw) > 5:
+        return "palette accepts a maximum of 5 colors."
+    for color in palette_raw:
+        if not is_valid_hex(color):
+            return f"'{color}' is not a valid HEX color (e.g. #FF5733)."
+    if genre not in VALID_GENRES:
+        return f"genre must be one of: {', '.join(VALID_GENRES)}."
+    return None
+
+def build_prompt(palette_raw, genre):
+    """Build the story generation prompt from palette and genre. Returns a prompt string."""
+    palette_str = ", ".join(palette_raw)
+    return (
+        f"You are a creative story writer. Given the following color palette: {palette_str}, "
+        f"write a short {genre} story (2-3 paragraphs) inspired by the mood, tone, and feeling "
+        f"these colors evoke. Do not mention the hex codes directly — let the colors influence "
+        f"the atmosphere and imagery instead."
+    )
+
+def call_claude(prompt):
+    """Send prompt to Claude API. Returns the generated story text."""
+    message = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text
 
 @app.route("/story", methods=["GET"])
 def generate_story():
@@ -30,36 +61,15 @@ def generate_story():
     palette_raw = request.args.getlist("palette")
     genre = request.args.get("genre", "fantasy").lower()
 
-    if not palette_raw:
-        return jsonify({"error": "palette is required. Provide at least one HEX color (e.g. palette=%23FF5733)."}), 400
-
-    if len(palette_raw) > 5:
-        return jsonify({"error": "palette accepts a maximum of 5 colors."}), 400
-
-    for color in palette_raw:
-        if not is_valid_hex(color):
-            return jsonify({"error": f"'{color}' is not a valid HEX color (e.g. #FF5733)."}), 400
-
-    if genre not in VALID_GENRES:
-        return jsonify({"error": f"genre must be one of: {', '.join(VALID_GENRES)}."}), 400
+    error = validate_params(palette_raw,genre)
+    if error:
+        return jsonify({"error":error}),400
 
     # Build prompt
-    palette_str = ", ".join(palette_raw)
-    prompt = (
-        f"You are a creative story writer. Given the following color palette: {palette_str}, "
-        f"write a short {genre} story (2-3 paragraphs) inspired by the mood, tone, and feeling "
-        f"these colors evoke. Do not mention the hex codes directly — let the colors influence "
-        f"the atmosphere and imagery instead."
-    )
+    prompt = build_prompt(palette_raw,genre)
 
     #Call Anthropic API
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    story_text = message.content[0].text
+    story_text = call_claude(prompt)
 
     return jsonify({
         "story": story_text,
